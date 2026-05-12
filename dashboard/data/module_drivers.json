@@ -1,0 +1,62 @@
+{
+  "global_lsi_column": "LSI_lgbm_tuned",
+  "local_lsi_column": "LSI_lgbm_local_multi",
+  "drivers": [
+    {
+      "module": "m1",
+      "score": "m1_shift_mad",
+      "value": "m1_shift",
+      "name": "Спред усреднения резервов",
+      "units": "млрд руб."
+    },
+    {
+      "module": "m1",
+      "score": "m1_ruo_mad",
+      "value": "m1_ruo",
+      "name": "RUONIA",
+      "units": "% годовых"
+    },
+    {
+      "module": "m2",
+      "score": "m2_MAD_score_cover",
+      "value": "m2_Cover_ratio",
+      "name": "Cover ratio репо ЦБ",
+      "units": "×"
+    },
+    {
+      "module": "m2",
+      "score": "m2_MAD_score_rate_spread",
+      "value": "m2_Rate_spread",
+      "name": "Спред репо к ключевой",
+      "units": "п.п."
+    },
+    {
+      "module": "m3",
+      "score": "m3_mad_score_cover",
+      "value": "m3_cover_ratio",
+      "name": "Cover ratio ОФЗ",
+      "units": "×"
+    },
+    {
+      "module": "m4",
+      "score": "_m4_tax_kick",
+      "value": "m4_tax_event_weight",
+      "name": "Налоговая нагрузка недели",
+      "units": ""
+    },
+    {
+      "module": "m5",
+      "score": "m5_MAD_score_liquidity_deficit",
+      "value": "m5_liquidity_deficit",
+      "name": "Структурный дефицит ЦБ",
+      "units": "млрд руб."
+    },
+    {
+      "module": "m5",
+      "score": "m5_MAD_score_treasury_pressure",
+      "value": "m5_treasury_pressure",
+      "name": "Давление казначейства",
+      "units": "млрд руб."
+    }
+  ]
+}

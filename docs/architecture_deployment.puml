@@ -1,0 +1,97 @@
+@startuml LSI_Deployment_Diagram
+title Диаграмма развёртывания (UML Deployment)\nЦелевой контур системы LSI — нотация node / artifact / database
+
+skinparam shadowing false
+skinparam linetype ortho
+left to right direction
+
+cloud "Публичные источники" as PUB {
+  artifact "cbr.ru" as SRC_CBR
+  artifact "minfin.gov.ru" as SRC_MIN
+  artifact "nalog.ru\nopen data" as SRC_FNS
+  artifact "roskazna.gov.ru\n(опц. ТЗ)" as SRC_RK
+}
+
+node "Периметр с исходящим доступом\n(bastion / egress)" as PERIM {
+  artifact "HTTP-клиенты\nPython requests" as HTTP
+}
+
+node "Кластер приложений\n(k8s / VM — на выбор)" as CLU {
+
+  node "Пакет «Оркестрация»" {
+    artifact "DAG: ingest + features\nAirflow / Prefect / cron" as ORCH
+  }
+
+  node "Пакет «Инжест»" {
+    artifact "Job: коннекторы M1–M5" as ING
+  }
+
+  node "Пакет «Фичи»" {
+    artifact "Batch: wide / MAD\npandas pipeline" as FEJOB
+  }
+
+  node "Пакет «ML»" {
+    artifact "Train job\n sklearn / CatBoost" as TRAIN
+    artifact "Score job\nensemble + XAI" as SCORE
+  }
+
+  node "Пакет «Сервисы»" {
+    artifact "LSI API\nFastAPI / gRPC" as SVC_API
+    artifact "Алертинг" as SVC_ALERT
+    artifact "LLM + RAG\n(бонус)" as SVC_LLM <<optional>>
+  }
+
+  node "Пакет «UI»" {
+    artifact "SPA дашборд\nReact / Streamlit" as UI
+  }
+}
+
+node "Данные и модели" as DATA_TIER {
+  database "Object / file store\n«сырой слой»" as OBJ
+  database "Feature Store\nwide_lsi parquet\nили TS DB" as FSDB
+  artifact "Реестр моделей\nMLflow каталог /\nверсионированные файлы" as REG
+}
+
+node "Клиентская среда" {
+  artifact "Браузер казначея /\nдемо" as BROWSER
+}
+
+' --- Связи (communication paths) ---
+SRC_CBR <.. HTTP : интернет
+SRC_MIN <.. HTTP
+SRC_FNS <.. HTTP
+SRC_RK <.. HTTP : расширение M5\n(опционально)
+
+ORCH --> HTTP : координация
+ORCH --> ING
+ING --> HTTP
+ING --> OBJ : запись версий сыра
+
+ORCH --> FEJOB
+FEJOB --> OBJ : read
+FEJOB --> FSDB : write wide_lsi
+
+ORCH --> SCORE : по расписанию
+FEJOB --> SCORE : артефакты признаков
+SCORE --> REG : load model
+SCORE --> FSDB : read features
+SCORE --> SVC_API : публикация среза /\nзапись в БД API
+
+TRAIN --> FSDB : train set
+TRAIN --> REG : publish
+TRAIN ..> ORCH : по расписанию\nреже чем scoring
+
+SVC_API --> FSDB : исторические запросы
+SVC_API --> REG : метаданные версии
+UI --> SVC_API : HTTPS
+BROWSER --> UI
+SVC_ALERT --> SVC_API : подписка /\npoll
+SVC_LLM ..> FSDB : RAG индекс
+SVC_LLM ..> SVC_API : контекст LSI
+
+note bottom of DATA_TIER
+  Резервное копирование, ILM и шифрование at-rest
+  задаются политикой инфраструктуры, не логикой ноутбука.
+end note
+
+@enduml

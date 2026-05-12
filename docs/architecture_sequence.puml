@@ -1,0 +1,75 @@
+@startuml LSI_Sequence_Only
+title Диаграмма последовательности · Плановый конвейер расчёта LSI\n(UML Sequence — отдельный файл)
+
+skinparam ParticipantPadding 20
+skinparam SequenceMessageAlign center
+
+actor "Планировщик\n(Airflow / Cron / k8s CronJob)" as SCH
+
+box "Инжест (коннекторы по модулям)"
+  participant "M1 резервы\n+ RUONIA" as M1
+  participant "M2 репо 7д" as M2
+  participant "M3 ОФЗ" as M3
+  participant "M4 календарь ФНС" as M4
+  participant "M5\nbliquidity ЦБ" as M5
+end box
+
+participant "Raw Zone\n(объектное хранилище /\nфайловый слой)" as RAW
+participant "Feature Pipeline\nmerge(date) · MAD · флаги\nTax_Week / сезонность" as FE
+participant "ML Job\nensemble + clip [0,100]\nXAI importance/SHAP" as ML
+participant "Model Registry\n(mlflow / файлы)" as MR
+participant "LSI API\nREST или gRPC" as API
+participant "Алертинг /\nуведомления" as ALERT
+
+actor "Пользователь\n(дашборд)" as USER
+
+SCH -> M1 : триггер задачи
+SCH -> M2
+SCH -> M3
+SCH -> M4
+SCH -> M5
+
+par сбор сырья (DAG может запускать задачи\nпараллельно или с зависимостями)
+  M1 -> RAW : сырое +\nверсия схемы / checksum
+also
+  M2 -> RAW
+also
+  M3 -> RAW
+also
+  M4 -> RAW
+also
+  M5 -> RAW
+end
+
+SCH -> FE : запуск сборки wide / wide_lsi
+
+FE -> RAW : прочитать нужные сырые срезы
+activate FE
+FE -> FE : нормализация дат,\nleft join по date,\nрасчёт MAD,\nпроизводные M4
+deactivate FE
+
+FE -> ML : X на дату T +\n(опц.) окно истории
+
+activate ML
+ML -> MR : загрузить активную\nверсию моделей
+
+alt ежедневный scoring (частый путь)
+  ML -> ML : predict → LSI,\nмодульный вклад,\nстатус по порогам
+else периодический batch retrain
+  ML -> MR : запись новой версии\nартефактов + метрик
+  ML -> ML : переобучение затем predict
+end
+
+ML -> API : опубликовать результат\n(LSI, статус, attribution)
+deactivate ML
+
+API -> ALERT : триггер правил\n(порог LSI / комбо флагов)
+
+USER -> API : GET история / последний срез
+API --> USER : JSON + метаданные версии модели
+
+note over API, ALERT
+  Бонус: после публикации среза возможен асинхронный вызов LLM + RAG по Feature Store (упрощённо не развёрнуто).
+end note
+
+@enduml

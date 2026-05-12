@@ -1,0 +1,156 @@
+@startuml LSI_Architecture_All
+title Страница 1 из 3 · Целевая архитектура LSI (компоненты)\nПСБ · раннее предупреждение стресса ликвидности
+
+skinparam componentStyle rectangle
+skinparam linetype ortho
+skinparam shadowing false
+
+package "Внешние источники данных (public)" <<Cloud>> {
+  component [ЦБ РФ\nExcel / HTML / UniDbQuery] as CBR
+  component [Минфин РФ\nxlsx аукционов ОФЗ] as MIN
+  component [ФНС\nOpen Data XML календарь] as FNS
+  component [Росказна\nЕКС депозиты] as ROS <<optional>>
+  component [ЦБ СОРС\nпривлечённые средства] as SORS <<optional>>
+}
+
+package "Шина данных / хранилище" {
+  database "Raw Zone\n(файлы, версии)" as RAW
+  database "Feature Store\nwide / wide_lsi\nParquet / TS-DB" as FEAT
+  database "Model Registry\nартефакты ML" as MR
+}
+
+package "Слой сбора (ETL / Ingest)" {
+  component [Оркестратор\nAirflow / cron] as ORCH
+  component [Коннектор M1\nрезервы + RUONIA] as E1
+  component [Коннектор M2\nрепо 7д] as E2
+  component [Коннектор M3\nОФЗ Минфин] as E3
+  component [Коннектор M4\nналоговый календарь] as E4
+  component [Коннектор M5\nликвидность / казнач.] as E5
+}
+
+package "Слой признаков" {
+  component [Объединение по date\nleft join M1–M5] as MERGE
+  component [MAD + флаги\nSeasonal / Tax flags] as NORM
+}
+
+package "Агрегационный слой (LSI)" {
+  component [Teacher /\nопорная метка] as TEACH
+  component [Ансамбль ML\nHGB / GBR / CatBoost\n± опц. DLinear] as ENS
+  component [Интерпретация\nimportance / SHAP] as XAI
+  component [LSI 0–100\n+ зона стресса] as LSI
+}
+
+package "Потребители" {
+  component [REST / gRPC API] as API
+  component [Веб-дашборд] as UI
+  component [Сервис алертов] as ALERT
+  component [Бонус: LLM\nRAG по данным] as LLM <<optional>>
+}
+
+CBR --> E1
+CBR --> E2
+CBR --> E5
+MIN --> E3
+FNS --> E4
+ROS ..> E5 : ТЗ расширение
+SORS ..> E5 : ТЗ расширение
+
+ORCH --> E1
+ORCH --> E2
+ORCH --> E3
+ORCH --> E4
+ORCH --> E5
+
+E1 --> RAW
+E2 --> RAW
+E3 --> RAW
+E4 --> RAW
+E5 --> RAW
+
+RAW --> MERGE
+MERGE --> NORM
+NORM --> FEAT
+
+FEAT --> TEACH
+FEAT --> ENS
+TEACH --> ENS : y для обучения
+ENS --> MR
+MR --> ENS
+ENS --> XAI
+ENS --> LSI
+
+LSI --> API
+FEAT --> API
+API --> UI
+API --> ALERT
+API --> LLM
+FEAT --> LLM
+LSI --> LLM
+
+newpage Страница 2 из 3 · Диаграмма классов (ядро предметной области)
+
+skinparam classAttributeIconSize 0
+
+class CalendarDay {
+  +date: Date
+}
+
+class WideDailyRow {
+  +date: Date
+}
+note right of WideDailyRow
+  Одна строка = календарный день;
+  left join выходов M1–M5 (как в final.ipynb)
+end note
+
+class TeacherLSI {
+  +value: Real
+}
+
+class EnsembleModel {
+  +models: Regressor[]
+}
+
+class LSIScore {
+  +value: Real
+  +status: StressStatus
+}
+
+enum StressStatus {
+  GREEN
+  YELLOW
+  RED
+}
+
+WideDailyRow ..> CalendarDay : нормализованная дата
+TeacherLSI ..> WideDailyRow : эвристика из MAD\nи флагов
+EnsembleModel --> TeacherLSI : обучение
+EnsembleModel ..> WideDailyRow : признаки X
+LSIScore --> WideDailyRow
+LSIScore --> EnsembleModel
+LSIScore --> StressStatus
+
+newpage Страница 3 из 3 · Диаграмма последовательности (пересчёт LSI)
+
+actor Планировщик as SCH
+participant "Инжест\nM1–M5" as ING
+participant "Raw Zone" as RAW
+participant "Feature\nPipeline" as FE
+participant "ML Job\nfit / predict" as ML
+participant "Model\nRegistry" as MR
+participant "LSI API" as API
+
+SCH -> ING : триггер по расписанию
+ING -> RAW : сырое + метаданные
+SCH -> FE : сбор wide / MAD
+FE -> RAW : чтение сырья
+FE -> FE : merge(date), нормализация
+FE -> ML : признаки на дату T
+ML -> MR : загрузка модели
+alt batch retrain
+  ML -> MR : сохранить версию
+end
+ML -> ML : predict, clip [0,100]
+ML -> API : срез LSI на дату T
+
+@enduml
